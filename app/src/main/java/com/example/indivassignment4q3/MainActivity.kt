@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.indivassignment4q3.ui.theme.IndivAssignment4Q3Theme
@@ -65,12 +64,14 @@ class TemperatureViewModel : ViewModel() {
     val isPaused = _isPaused.asStateFlow()
 
     private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    // Job reference for cancellable background data simulation.
     private var simulationJob: Job? = null
 
     init {
         togglePauseResume() // Start simulation immediately.
     }
 
+    // Derived state flows for efficient, automatic calculation of summary stats.
     val currentTemp = readings.map { it.firstOrNull()?.value }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val minTemp = readings.map { it.minOfOrNull { r -> r.value } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val maxTemp = readings.map { it.maxOfOrNull { r -> r.value } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -80,17 +81,20 @@ class TemperatureViewModel : ViewModel() {
         _isPaused.value = !_isPaused.value
 
         if (!_isPaused.value) {
+            // Use viewModelScope to tie the coroutine's lifecycle to the ViewModel's.
             simulationJob = viewModelScope.launch {
                 while (true) {
                     val newReading = TemperatureReading(
                         value = Random.nextFloat() * 20 + 65, // 65-85°F
                         timestamp = dateFormat.format(Date())
                     )
+                    // Thread-safe update that adds the latest reading and limits the list size.
                     _readings.update { (listOf(newReading) + it).take(20) }
                     delay(2000) // Requirement: update every 2 seconds.
                 }
             }
         } else {
+            // Stop the simulation to prevent resource leaks when paused.
             simulationJob?.cancel()
         }
     }
@@ -143,6 +147,7 @@ fun DashboardScreen(modifier: Modifier = Modifier, viewModel: TemperatureViewMod
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
+        // Use LazyColumn for efficient display of a potentially long list of items.
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(readings) { reading ->
                 ReadingItem(reading)
@@ -254,6 +259,7 @@ fun TopBar(isPaused: Boolean, onToggle: () -> Unit) {
     )
 }
 
+// Utility function for clean display formatting.
 fun Float.roundTo1Decimal(): String = "%.1f".format(this)
 
 @Preview(showBackground = true)
