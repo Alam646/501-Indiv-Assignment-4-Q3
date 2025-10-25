@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -50,7 +53,6 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
 import kotlin.random.Random
 
 data class TemperatureReading(val value: Float, val timestamp: String)
@@ -63,14 +65,12 @@ class TemperatureViewModel : ViewModel() {
     val isPaused = _isPaused.asStateFlow()
 
     private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    // Job reference for cancellable background data simulation.
     private var simulationJob: Job? = null
 
     init {
         togglePauseResume() // Start simulation immediately.
     }
 
-    // Derived state flows for efficient, automatic calculation of summary stats.
     val currentTemp = readings.map { it.firstOrNull()?.value }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val minTemp = readings.map { it.minOfOrNull { r -> r.value } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val maxTemp = readings.map { it.maxOfOrNull { r -> r.value } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -80,20 +80,17 @@ class TemperatureViewModel : ViewModel() {
         _isPaused.value = !_isPaused.value
 
         if (!_isPaused.value) {
-            // Use viewModelScope to tie the coroutine's lifecycle to the ViewModel's.
             simulationJob = viewModelScope.launch {
                 while (true) {
                     val newReading = TemperatureReading(
                         value = Random.nextFloat() * 20 + 65, // 65-85°F
                         timestamp = dateFormat.format(Date())
                     )
-                    // Thread-safe update that adds the latest reading and limits the list size.
                     _readings.update { (listOf(newReading) + it).take(20) }
                     delay(2000) // Requirement: update every 2 seconds.
                 }
             }
         } else {
-            // Stop the simulation to prevent resource leaks when paused.
             simulationJob?.cancel()
         }
     }
@@ -139,18 +136,58 @@ fun DashboardScreen(modifier: Modifier = Modifier, viewModel: TemperatureViewMod
 
     Column(modifier = modifier.fillMaxSize()) {
         SummaryView(currentTemp, minTemp, maxTemp, avgTemp, isPaused)
-
+        LineChart(readings = readings)
+        Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = "Recent Readings",
             style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(horizontal = 16.dp)
         )
-        // Use LazyColumn for efficient display of a potentially long list of items.
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(readings) { reading ->
                 ReadingItem(reading)
             }
         }
+    }
+}
+
+@Composable
+fun LineChart(readings: List<TemperatureReading>) {
+    // Only draw the chart if there is more than one point to plot.
+    if (readings.size < 2) return
+
+    val data = readings.reversed()
+    val minTemp = 65f
+    val maxTemp = 85f
+    val chartColor = MaterialTheme.colorScheme.primary
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(150.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) { 
+        val path = Path()
+        val xStep = size.width / (data.size - 1)
+        val yRange = maxTemp - minTemp
+
+        data.forEachIndexed { index, reading ->
+            val x = index * xStep
+            // Normalize the y-value to the canvas height, inverting it as canvas Y is top-to-bottom.
+            val y = size.height - ((reading.value - minTemp) / yRange) * size.height
+
+            if (index == 0) {
+                path.moveTo(x, y)
+            } else {
+                path.lineTo(x, y)
+            }
+        }
+
+        drawPath(
+            path = path,
+            color = chartColor,
+            style = Stroke(width = 3.dp.toPx())
+        )
     }
 }
 
@@ -217,9 +254,7 @@ fun TopBar(isPaused: Boolean, onToggle: () -> Unit) {
     )
 }
 
-// Utility function for clean display formatting.
 fun Float.roundTo1Decimal(): String = "%.1f".format(this)
-
 
 @Preview(showBackground = true)
 @Composable
